@@ -623,10 +623,13 @@ def messages(limit: int = typer.Option(20, "--limit", "-n", help="Number of mess
 
         if m.reply_to and m.reply_to in msg_by_id:
             parent = msg_by_id[m.reply_to]
+            # Truncate parent message for display
+            parent_preview = parent.text[:40] + "..." if len(parent.text) > 40 else parent.text
             console.print(
                 f"  [dim]{time_str}[/dim] [cyan]\\[{msg_id}][/cyan] [bold]{m.author}[/bold] "
-                f"→ [dim]{parent.author}[/dim]: {m.text}"
+                f"→ [dim]{parent.author}: \"{parent_preview}\"[/dim]"
             )
+            console.print(f"    ↳ {m.text}")
         else:
             console.print(
                 f"  [dim]{time_str}[/dim] [cyan]\\[{msg_id}][/cyan] [bold]{m.author}[/bold]: {m.text}"
