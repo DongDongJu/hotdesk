@@ -230,6 +230,27 @@ class Message:
 
 MESSAGES_FILE = "messages.json"
 MESSAGES_LOCK = "messages.lock"
+MESSAGE_EXPIRY_DAYS = 7
+
+
+def _is_older_than_days(iso_time: str, days: int) -> bool:
+    """Check if an ISO timestamp is older than N days."""
+    try:
+        # Parse ISO format: 2025-12-28T10:30:00+0900
+        # Extract date part and compare
+        if len(iso_time) < 10:
+            return False
+        msg_date = iso_time[:10]  # YYYY-MM-DD
+        now_date = time.strftime("%Y-%m-%d")
+
+        # Simple comparison using time difference
+        from datetime import datetime
+        msg_dt = datetime.strptime(msg_date, "%Y-%m-%d")
+        now_dt = datetime.strptime(now_date, "%Y-%m-%d")
+        diff = (now_dt - msg_dt).days
+        return diff > days
+    except Exception:
+        return False
 
 
 class MessageBoard:
@@ -261,6 +282,13 @@ class MessageBoard:
         import string
         return "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
 
+    def _cleanup_expired(self, messages: list[dict]) -> list[dict]:
+        """Remove messages older than MESSAGE_EXPIRY_DAYS."""
+        return [
+            m for m in messages
+            if not _is_older_than_days(m.get("created_at", ""), MESSAGE_EXPIRY_DAYS)
+        ]
+
     def post(self, author: str, text: str, reply_to: str = "") -> Message:
         """Post a new message or reply."""
         self.lock_path.touch(exist_ok=True)
@@ -268,6 +296,9 @@ class MessageBoard:
             fcntl.flock(f, fcntl.LOCK_EX)
             data = self._load_unlocked()
             messages = data.setdefault("messages", [])
+
+            # Auto-remove messages older than 7 days
+            messages = self._cleanup_expired(messages)
 
             msg_id = self._generate_id()
             created_at = _now_iso()
@@ -284,8 +315,8 @@ class MessageBoard:
             # Keep only last 100 messages
             if len(messages) > 100:
                 messages = messages[-100:]
-                data["messages"] = messages
 
+            data["messages"] = messages
             self._save_unlocked(data)
             fcntl.flock(f, fcntl.LOCK_UN)
 
@@ -297,8 +328,8 @@ class MessageBoard:
             reply_to=reply_to,
         )
 
-    def get_all(self) -> list[Message]:
-        """Get all messages."""
+    def get_all(self, latest_first: bool = True) -> list[Message]:
+        """Get all messages, sorted by time (latest first by default)."""
         self.lock_path.touch(exist_ok=True)
         with open(self.lock_path, "r+") as f:
             fcntl.flock(f, fcntl.LOCK_SH)
@@ -306,19 +337,26 @@ class MessageBoard:
             messages = data.get("messages") or []
             out: list[Message] = []
             for m in messages:
+                created_at = str(m.get("created_at", ""))
+                # Skip expired messages in output
+                if _is_older_than_days(created_at, MESSAGE_EXPIRY_DAYS):
+                    continue
                 out.append(Message(
                     id=str(m.get("id", "")),
                     author=str(m.get("author", "")),
                     text=str(m.get("text", "")),
-                    created_at=str(m.get("created_at", "")),
+                    created_at=created_at,
                     reply_to=str(m.get("reply_to", "")),
                 ))
             fcntl.flock(f, fcntl.LOCK_UN)
+
+        # Sort by created_at (ISO format sorts lexicographically)
+        out.sort(key=lambda m: m.created_at, reverse=latest_first)
         return out
 
     def get_by_id(self, msg_id: str) -> Message | None:
         """Get a message by ID."""
-        for m in self.get_all():
+        for m in self.get_all(latest_first=False):
             if m.id == msg_id:
                 return m
         return None
@@ -331,9 +369,15 @@ class MessageBoard:
             data = self._load_unlocked()
             messages = data.get("messages") or []
             original_count = len(messages)
+
+            # First remove expired messages
+            messages = self._cleanup_expired(messages)
+
+            # Then keep only last N
             if len(messages) > keep_last:
                 messages = messages[-keep_last:]
-                data["messages"] = messages
-                self._save_unlocked(data)
+
+            data["messages"] = messages
+            self._save_unlocked(data)
             fcntl.flock(f, fcntl.LOCK_UN)
         return original_count - len(messages)

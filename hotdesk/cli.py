@@ -552,9 +552,9 @@ def reply(name: str, msg_id: str, text: str = typer.Argument(None)) -> None:
 
 @app.command()
 def messages(limit: int = typer.Option(20, "--limit", "-n", help="Number of messages to show")) -> None:
-    """Show the shared message board."""
+    """Show the shared message board (latest first, auto-removes after 7 days)."""
     board = MessageBoard()
-    all_msgs = board.get_all()
+    all_msgs = board.get_all(latest_first=True)
 
     if not all_msgs:
         console.print("No messages yet. Post one with: hotdesk msg <name> <text>")
@@ -563,10 +563,10 @@ def messages(limit: int = typer.Option(20, "--limit", "-n", help="Number of mess
     # Build a lookup for replies
     msg_by_id = {m.id: m for m in all_msgs}
 
-    # Get last N messages
-    recent = all_msgs[-limit:]
+    # Get first N messages (already sorted latest-first)
+    recent = all_msgs[:limit]
 
-    console.print(f"\n[bold]📋 Message Board[/bold] (last {len(recent)} of {len(all_msgs)})\n")
+    console.print(f"\n[bold]📋 Message Board[/bold] (showing {len(recent)} of {len(all_msgs)}, 7-day retention)\n")
 
     for m in recent:
         time_str = format_time_short(m.created_at)
