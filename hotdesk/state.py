@@ -215,3 +215,125 @@ class SaveStore:
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         tmp.replace(path)
         return path
+
+
+@dataclass
+class Message:
+    """A message on the shared message board."""
+
+    id: str
+    author: str
+    text: str
+    created_at: str
+    reply_to: str = ""  # id of parent message, empty if top-level
+
+
+MESSAGES_FILE = "messages.json"
+MESSAGES_LOCK = "messages.lock"
+
+
+class MessageBoard:
+    """Shared message board for all users."""
+
+    def __init__(self, state_dir: Path | None = None) -> None:
+        self.state_dir = state_dir or DEFAULT_STATE_DIR
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        self.lock_path = self.state_dir / MESSAGES_LOCK
+        self.messages_path = self.state_dir / MESSAGES_FILE
+
+    def _load_unlocked(self) -> Dict[str, Any]:
+        if not self.messages_path.exists():
+            return {"version": 1, "messages": []}
+        try:
+            return json.loads(self.messages_path.read_text(encoding="utf-8"))
+        except Exception:
+            bak = self.state_dir / f"messages.corrupt.{int(time.time())}.json"
+            bak.write_text(self.messages_path.read_text(encoding="utf-8", errors="ignore"), encoding="utf-8")
+            return {"version": 1, "messages": []}
+
+    def _save_unlocked(self, data: Dict[str, Any]) -> None:
+        tmp = self.state_dir / f".messages.{os.getpid()}.tmp"
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(self.messages_path)
+
+    def _generate_id(self) -> str:
+        import random
+        import string
+        return "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
+
+    def post(self, author: str, text: str, reply_to: str = "") -> Message:
+        """Post a new message or reply."""
+        self.lock_path.touch(exist_ok=True)
+        with open(self.lock_path, "r+") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            data = self._load_unlocked()
+            messages = data.setdefault("messages", [])
+
+            msg_id = self._generate_id()
+            created_at = _now_iso()
+
+            msg_data = {
+                "id": msg_id,
+                "author": author,
+                "text": text,
+                "created_at": created_at,
+                "reply_to": reply_to,
+            }
+            messages.append(msg_data)
+
+            # Keep only last 100 messages
+            if len(messages) > 100:
+                messages = messages[-100:]
+                data["messages"] = messages
+
+            self._save_unlocked(data)
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+        return Message(
+            id=msg_id,
+            author=author,
+            text=text,
+            created_at=created_at,
+            reply_to=reply_to,
+        )
+
+    def get_all(self) -> list[Message]:
+        """Get all messages."""
+        self.lock_path.touch(exist_ok=True)
+        with open(self.lock_path, "r+") as f:
+            fcntl.flock(f, fcntl.LOCK_SH)
+            data = self._load_unlocked()
+            messages = data.get("messages") or []
+            out: list[Message] = []
+            for m in messages:
+                out.append(Message(
+                    id=str(m.get("id", "")),
+                    author=str(m.get("author", "")),
+                    text=str(m.get("text", "")),
+                    created_at=str(m.get("created_at", "")),
+                    reply_to=str(m.get("reply_to", "")),
+                ))
+            fcntl.flock(f, fcntl.LOCK_UN)
+        return out
+
+    def get_by_id(self, msg_id: str) -> Message | None:
+        """Get a message by ID."""
+        for m in self.get_all():
+            if m.id == msg_id:
+                return m
+        return None
+
+    def clear_old(self, keep_last: int = 50) -> int:
+        """Remove old messages, keeping the last N."""
+        self.lock_path.touch(exist_ok=True)
+        with open(self.lock_path, "r+") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            data = self._load_unlocked()
+            messages = data.get("messages") or []
+            original_count = len(messages)
+            if len(messages) > keep_last:
+                messages = messages[-keep_last:]
+                data["messages"] = messages
+                self._save_unlocked(data)
+            fcntl.flock(f, fcntl.LOCK_UN)
+        return original_count - len(messages)

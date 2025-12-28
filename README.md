@@ -12,12 +12,18 @@
 
 ## Commands (intentionally minimal)
 
+### Desk management
 - `hotdesk prepare <name>` – check the board, reserve your desk name
 - `hotdesk start <name>` – check in: enter your tmux desk (and cgroup if available)
 - `hotdesk resume <name>` – re-attach to an existing tmux session (no cgroup setup)
 - `hotdesk status` – show who is active and what they're running
 - `hotdesk save <name>` – save a snapshot + leave a short note
 - `hotdesk stop <name>` – check out: **auto-saves** if you forgot to save, then stops that desk
+
+### Shared message board
+- `hotdesk msg <name> <text>` – post a message to the shared board
+- `hotdesk reply <name> <msg_id> <text>` – reply to a specific message
+- `hotdesk messages` – show the message board (use `-n 50` to show more)
 
 ### Typical flow
 
@@ -33,6 +39,19 @@ hotdesk save bob
 
 # done for the day
 hotdesk stop bob
+```
+
+### Message board example
+
+```bash
+# Post a message
+hotdesk msg bob "Starting GPU training, will take ~4 hours"
+
+# Check messages
+hotdesk messages
+
+# Reply to a message (use the message ID shown in brackets)
+hotdesk reply alice abc123 "OK, I'll wait. Ping me when done!"
 ```
 
 ---

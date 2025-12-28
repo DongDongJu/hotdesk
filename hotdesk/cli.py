@@ -14,7 +14,7 @@ from rich.table import Table
 from . import __version__
 from . import cgroup as cglib
 from .proc import build_ppid_map, descendants, summarize_pids
-from .state import Board, SaveStore
+from .state import Board, MessageBoard, SaveStore
 from . import tmux as tmuxlib
 
 app = typer.Typer(
@@ -479,3 +479,109 @@ def status() -> None:
         )
 
     console.print(table)
+
+
+# -----------------------------
+# Message Board Commands
+# -----------------------------
+
+
+def read_message_text() -> str:
+    """Read message text from stdin or prompt."""
+    try:
+        if not sys.stdin.isatty():
+            return sys.stdin.read().strip()
+    except Exception:
+        pass
+
+    try:
+        return typer.prompt("Message", default="", show_default=False)
+    except (EOFError, KeyboardInterrupt):
+        return ""
+
+
+def format_time_short(iso_time: str) -> str:
+    """Format ISO time to a shorter display format."""
+    try:
+        # Parse and reformat: 2025-12-28T10:30:00+0900 -> 12/28 10:30
+        if len(iso_time) >= 16:
+            return f"{iso_time[5:7]}/{iso_time[8:10]} {iso_time[11:16]}"
+    except Exception:
+        pass
+    return iso_time[:16] if len(iso_time) > 16 else iso_time
+
+
+@app.command()
+def msg(name: str, text: str = typer.Argument(None)) -> None:
+    """Post a message to the shared board. Usage: hotdesk msg <name> [text]"""
+    if not text:
+        text = read_message_text()
+
+    if not text.strip():
+        console.print("[red]Error:[/red] message cannot be empty.")
+        raise typer.Exit(code=1)
+
+    board = MessageBoard()
+    m = board.post(author=name, text=text.strip())
+
+    console.print(f"[green]Posted[/green] [{m.id}] {name}: {text.strip()}")
+
+
+@app.command()
+def reply(name: str, msg_id: str, text: str = typer.Argument(None)) -> None:
+    """Reply to a message. Usage: hotdesk reply <name> <msg_id> [text]"""
+    board = MessageBoard()
+
+    parent = board.get_by_id(msg_id)
+    if not parent:
+        console.print(f"[red]Error:[/red] message '{msg_id}' not found.")
+        raise typer.Exit(code=1)
+
+    if not text:
+        console.print(f"[dim]Replying to {parent.author}: {parent.text[:50]}...[/dim]")
+        text = read_message_text()
+
+    if not text.strip():
+        console.print("[red]Error:[/red] reply cannot be empty.")
+        raise typer.Exit(code=1)
+
+    m = board.post(author=name, text=text.strip(), reply_to=msg_id)
+
+    console.print(f"[green]Replied[/green] [{m.id}] {name} → {parent.author}: {text.strip()}")
+
+
+@app.command()
+def messages(limit: int = typer.Option(20, "--limit", "-n", help="Number of messages to show")) -> None:
+    """Show the shared message board."""
+    board = MessageBoard()
+    all_msgs = board.get_all()
+
+    if not all_msgs:
+        console.print("No messages yet. Post one with: hotdesk msg <name> <text>")
+        raise typer.Exit(code=0)
+
+    # Build a lookup for replies
+    msg_by_id = {m.id: m for m in all_msgs}
+
+    # Get last N messages
+    recent = all_msgs[-limit:]
+
+    console.print(f"\n[bold]📋 Message Board[/bold] (last {len(recent)} of {len(all_msgs)})\n")
+
+    for m in recent:
+        time_str = format_time_short(m.created_at)
+
+        if m.reply_to and m.reply_to in msg_by_id:
+            parent = msg_by_id[m.reply_to]
+            console.print(
+                f"  [dim]{time_str}[/dim] [cyan][{m.id}][/cyan] [bold]{m.author}[/bold] "
+                f"→ [dim]{parent.author}[/dim]: {m.text}"
+            )
+        else:
+            console.print(
+                f"  [dim]{time_str}[/dim] [cyan][{m.id}][/cyan] [bold]{m.author}[/bold]: {m.text}"
+            )
+
+    console.print(
+        "\n[dim]Commands: hotdesk msg <name> <text> | hotdesk reply <name> <id> <text>[/dim]"
+    )
