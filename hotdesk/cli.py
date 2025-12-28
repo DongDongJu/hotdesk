@@ -282,7 +282,7 @@ def save(name: str) -> None:
 
 @app.command()
 def stop(name: str) -> None:
-    """Check out: auto-save if needed, then stop tmux + desk processes."""
+    """Soft stop: mark desk as stopped but keep tmux session alive (preserves history)."""
     ensure_desk(name)
 
     board = Board()
@@ -298,32 +298,70 @@ def stop(name: str) -> None:
         except Exception as e:
             console.print(f"[yellow]Warning:[/yellow] auto-save failed: {e}")
 
-    # Stop tmux session first.
+    board.upsert(name, status="stopped", stopped_at=now_iso())
+
+    active = is_tmux_active(name)
+    pids = desk_pids(name) if active else set()
+
+    console.print(f"[yellow]⏸ Stopped[/yellow] desk '{name}' (tmux session preserved).")
+    if pids:
+        console.print(f"[dim]  {len(pids)} process(es) still running. Use 'hotdesk freeze {name}' to pause them.[/dim]")
+    console.print(f"[dim]  To resume: hotdesk start {name}[/dim]")
+    console.print(f"[dim]  To terminate completely: hotdesk kill {name}[/dim]")
+
+
+@app.command(name="kill")
+def kill_desk(name: str, force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation")) -> None:
+    """Hard stop: kill all processes and terminate tmux session (destroys history)."""
+    board = Board()
+    d = board.get(name)
+
+    if not d:
+        console.print(f"[red]Error:[/red] desk '{name}' not found.")
+        raise typer.Exit(code=1)
+
+    active = is_tmux_active(name)
+    pids = desk_pids(name) if active else set()
+
+    if not force and (active or pids):
+        console.print(f"[yellow]Warning:[/yellow] This will terminate tmux session and kill {len(pids)} process(es).")
+        console.print("[yellow]All scrollback history will be lost![/yellow]")
+        confirm = typer.confirm("Are you sure?")
+        if not confirm:
+            console.print("Cancelled.")
+            raise typer.Exit(code=0)
+
+    # Auto-save before killing
+    if d.started_at and not d.is_saved_since_start():
+        try:
+            note = d.note or "(auto-save on kill)"
+            path = save_snapshot(name, note=note, auto=True)
+            console.print(f"Auto-saved: {path}")
+        except Exception as e:
+            console.print(f"[yellow]Warning:[/yellow] auto-save failed: {e}")
+
+    killed = 0
+    exclude = {os.getpid()}
+
+    # Kill processes from tmux-derived process tree first
+    for pid in pids:
+        if pid in exclude:
+            continue
+        try:
+            os.kill(pid, signal.SIGTERM)
+            killed += 1
+        except Exception:
+            pass
+
+    # Then kill tmux session
     try:
         tmuxlib.kill_session(name, name)
     except Exception:
         pass
 
-    killed = 0
-    exclude = {os.getpid()}
+    board.upsert(name, status="killed", stopped_at=now_iso())
 
-    # Kill processes from tmux-derived process tree.
-    try:
-        pids = desk_pids(name)
-        for pid in pids:
-            if pid in exclude:
-                continue
-            try:
-                os.kill(pid, signal.SIGTERM)
-                killed += 1
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    board.upsert(name, status="stopped", stopped_at=now_iso())
-
-    console.print(f"Stopped desk '{name}'. Signaled ~{killed} process(es) with TERM.")
+    console.print(f"[red]✗ Killed[/red] desk '{name}'. Terminated {killed} process(es) and tmux session.")
 
 
 @app.command()

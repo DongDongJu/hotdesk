@@ -20,7 +20,8 @@
 - `hotdesk save <name>` – save a snapshot + leave a short note
 - `hotdesk freeze <name>` – pause all processes in the desk (SIGSTOP)
 - `hotdesk unfreeze <name>` – resume all paused processes (SIGCONT)
-- `hotdesk stop <name>` – check out: **auto-saves** if you forgot to save, then stops that desk
+- `hotdesk stop <name>` – soft stop: mark as stopped but **keep tmux session alive** (preserves history)
+- `hotdesk kill <name>` – hard stop: **terminate everything** including tmux session (destroys history)
 
 ### Shared message board
 - `hotdesk msg <name> <text>` – post a message to the shared board
@@ -45,8 +46,14 @@ hotdesk unfreeze bob
 # later (leave a note + snapshot)
 hotdesk save bob
 
-# done for the day
+# done for the day - soft stop (keeps tmux history):
 hotdesk stop bob
+
+# next day - resume where you left off:
+hotdesk start bob   # re-attaches to existing session with history!
+
+# completely done? terminate everything:
+hotdesk kill bob
 ```
 
 ### Message board example
