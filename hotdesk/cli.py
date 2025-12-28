@@ -524,7 +524,7 @@ def msg(name: str, text: str = typer.Argument(None)) -> None:
     board = MessageBoard()
     m = board.post(author=name, text=text.strip())
 
-    console.print(f"[green]Posted[/green] [{m.id}] {name}: {text.strip()}")
+    console.print(f"[green]Posted[/green] \\[{m.id}] {name}: {text.strip()}")
 
 
 @app.command()
@@ -547,7 +547,7 @@ def reply(name: str, msg_id: str, text: str = typer.Argument(None)) -> None:
 
     m = board.post(author=name, text=text.strip(), reply_to=msg_id)
 
-    console.print(f"[green]Replied[/green] [{m.id}] {name} → {parent.author}: {text.strip()}")
+    console.print(f"[green]Replied[/green] \\[{m.id}] {name} → {parent.author}: {text.strip()}")
 
 
 @app.command(name="setup-cgroup")
@@ -619,16 +619,17 @@ def messages(limit: int = typer.Option(20, "--limit", "-n", help="Number of mess
 
     for m in recent:
         time_str = format_time_short(m.created_at)
+        msg_id = m.id if m.id else "???"
 
         if m.reply_to and m.reply_to in msg_by_id:
             parent = msg_by_id[m.reply_to]
             console.print(
-                f"  [dim]{time_str}[/dim] [cyan][{m.id}][/cyan] [bold]{m.author}[/bold] "
+                f"  [dim]{time_str}[/dim] [cyan]\\[{msg_id}][/cyan] [bold]{m.author}[/bold] "
                 f"→ [dim]{parent.author}[/dim]: {m.text}"
             )
         else:
             console.print(
-                f"  [dim]{time_str}[/dim] [cyan][{m.id}][/cyan] [bold]{m.author}[/bold]: {m.text}"
+                f"  [dim]{time_str}[/dim] [cyan]\\[{msg_id}][/cyan] [bold]{m.author}[/bold]: {m.text}"
             )
 
     console.print(
