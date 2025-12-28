@@ -14,7 +14,8 @@
 
 - `hotdesk prepare <name>` – check the board, reserve your desk name
 - `hotdesk start <name>` – check in: enter your tmux desk (and cgroup if available)
-- `hotdesk status` – show who is active and what they’re running
+- `hotdesk resume <name>` – re-attach to an existing tmux session (no cgroup setup)
+- `hotdesk status` – show who is active and what they're running
 - `hotdesk save <name>` – save a snapshot + leave a short note
 - `hotdesk stop <name>` – check out: **auto-saves** if you forgot to save, then stops that desk
 
@@ -23,6 +24,9 @@
 ```bash
 hotdesk prepare bob
 hotdesk start bob
+
+# detached from tmux? re-attach easily:
+hotdesk resume bob
 
 # later (leave a note + snapshot)
 hotdesk save bob

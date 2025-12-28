@@ -318,13 +318,33 @@ def start(name: str) -> None:
     board.upsert(name, status="running", started_at=now_iso(), saved_at="")
 
     # Best-effort: enter cgroup before exec'ing into tmux.
-    warn = try_enter_cgroup(d.cgroup_method, d.cgroup_path)
-    if warn:
-        console.print(f"[yellow]Warning:[/yellow] {warn}")
+    # Only warn if cgroup was configured but we can't enter it
+    if d.cgroup_path:
+        warn = try_enter_cgroup(d.cgroup_method, d.cgroup_path)
+        if warn:
+            console.print(f"[dim]Note: cgroup unavailable, using tmux-only tracking[/dim]")
 
     workdir = d.workdir or auto_workdir(name)
     board.upsert(name, workdir=workdir, tmux_server=name, tmux_session=name)
 
+    tmuxlib.new_or_attach(server=name, session=name, workdir=workdir)
+
+
+@app.command()
+def resume(name: str) -> None:
+    """Re-attach to an existing tmux desk session (no cgroup setup)."""
+    board = Board()
+    d = board.get(name)
+
+    if not d:
+        console.print(f"[red]Error:[/red] desk '{name}' not found. Use 'hotdesk start {name}' first.")
+        raise typer.Exit(code=1)
+
+    if not is_tmux_active(name):
+        console.print(f"[red]Error:[/red] no active tmux session for '{name}'. Use 'hotdesk start {name}' instead.")
+        raise typer.Exit(code=1)
+
+    workdir = d.workdir or auto_workdir(name)
     tmuxlib.new_or_attach(server=name, session=name, workdir=workdir)
 
 
