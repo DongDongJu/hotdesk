@@ -18,6 +18,8 @@
 - `hotdesk resume <name>` – re-attach to an existing tmux session
 - `hotdesk status` – show who is active and what they're running
 - `hotdesk save <name>` – save a snapshot + leave a short note
+- `hotdesk freeze <name>` – pause all processes in the desk (SIGSTOP)
+- `hotdesk unfreeze <name>` – resume all paused processes (SIGCONT)
 - `hotdesk stop <name>` – check out: **auto-saves** if you forgot to save, then stops that desk
 
 ### Shared message board
@@ -33,6 +35,12 @@ hotdesk start bob
 
 # detached from tmux? re-attach easily:
 hotdesk resume bob
+
+# need to free up resources temporarily? freeze your session:
+hotdesk freeze bob
+
+# ready to continue? unfreeze:
+hotdesk unfreeze bob
 
 # later (leave a note + snapshot)
 hotdesk save bob

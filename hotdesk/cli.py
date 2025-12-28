@@ -327,6 +327,83 @@ def stop(name: str) -> None:
 
 
 @app.command()
+def freeze(name: str) -> None:
+    """Freeze (pause) all processes in a desk session using SIGSTOP."""
+    board = Board()
+    d = board.get(name)
+
+    if not d:
+        console.print(f"[red]Error:[/red] desk '{name}' not found.")
+        raise typer.Exit(code=1)
+
+    if not is_tmux_active(name):
+        console.print(f"[red]Error:[/red] no active tmux session for '{name}'.")
+        raise typer.Exit(code=1)
+
+    if d.status == "frozen":
+        console.print(f"[yellow]Warning:[/yellow] desk '{name}' is already frozen.")
+        raise typer.Exit(code=0)
+
+    pids = desk_pids(name)
+    exclude = {os.getpid()}
+    frozen_count = 0
+
+    for pid in pids:
+        if pid in exclude:
+            continue
+        try:
+            os.kill(pid, signal.SIGSTOP)
+            frozen_count += 1
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            pass
+        except Exception:
+            pass
+
+    board.upsert(name, status="frozen")
+
+    console.print(f"[cyan]❄ Frozen[/cyan] desk '{name}'. Paused {frozen_count} process(es).")
+    console.print(f"[dim]To resume: hotdesk unfreeze {name}[/dim]")
+
+
+@app.command()
+def unfreeze(name: str) -> None:
+    """Unfreeze (resume) all processes in a desk session using SIGCONT."""
+    board = Board()
+    d = board.get(name)
+
+    if not d:
+        console.print(f"[red]Error:[/red] desk '{name}' not found.")
+        raise typer.Exit(code=1)
+
+    if not is_tmux_active(name):
+        console.print(f"[red]Error:[/red] no active tmux session for '{name}'.")
+        raise typer.Exit(code=1)
+
+    pids = desk_pids(name)
+    exclude = {os.getpid()}
+    resumed_count = 0
+
+    for pid in pids:
+        if pid in exclude:
+            continue
+        try:
+            os.kill(pid, signal.SIGCONT)
+            resumed_count += 1
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            pass
+        except Exception:
+            pass
+
+    board.upsert(name, status="running")
+
+    console.print(f"[green]▶ Resumed[/green] desk '{name}'. Continued {resumed_count} process(es).")
+
+
+@app.command()
 def status() -> None:
     """Show the board: who is active, and what they are running."""
     board = Board()
@@ -362,9 +439,14 @@ def status() -> None:
 
         saved = "yes" if d.is_saved_since_start() else ("-" if not d.started_at else "no")
 
+        # Style frozen status differently
+        status_display = d.status
+        if d.status == "frozen":
+            status_display = "[cyan]❄ frozen[/cyan]"
+
         table.add_row(
             name,
-            d.status,
+            status_display,
             "yes" if is_active else "no",
             saved,
             d.note or "",
