@@ -12,14 +12,13 @@ from rich.console import Console
 from rich.table import Table
 
 from . import __version__
-from . import cgroup as cglib
 from .proc import build_ppid_map, descendants, summarize_pids
 from .state import Board, MessageBoard, SaveStore
 from . import tmux as tmuxlib
 
 app = typer.Typer(
     add_completion=False,
-    help="hotdesk: a co-working style desk/session coordinator for a shared Linux account GPU box (tmux + cgroup v2).",
+    help="hotdesk: a co-working style desk/session coordinator for shared machines (tmux-based).",
 )
 console = Console()
 
@@ -68,59 +67,6 @@ def is_tmux_active(name: str) -> bool:
     return tmuxlib.has_session(name, name)
 
 
-def try_create_cgroup(name: str) -> tuple[str, str, str]:
-    """Try to create a per-desk cgroup.
-
-    Returns (method, path, warning). method/path empty if unavailable.
-    """
-    # cgroup v2 is Linux-only; skip silently on other platforms
-    if not cglib.is_linux():
-        return "", "", ""
-
-    if not cglib.is_cgroup2():
-        return "", "", "cgroup v2 not detected"
-
-    base = cglib.default_base()
-
-    try:
-        cg = cglib.create(name, base=base)
-        return cg.method, str(cg.path), ""
-    except PermissionError:
-        warn = (
-            f"cgroup base not writable: {base}. "
-            "Ask an admin to run the one-time setup from README."
-        )
-        return "", "", warn
-    except Exception as e:
-        return "", "", f"failed to create cgroup: {e}"
-
-
-def try_enter_cgroup(method: str, path: str) -> tuple[bool, str]:
-    """Move the current process into the desk cgroup (best-effort).
-    
-    Returns (success, message).
-    """
-    if not method or not path:
-        return True, ""  # No cgroup configured, not an error
-    
-    try:
-        cg = cglib.CGroup(method=method, path=Path(path))
-        
-        # First check if writable
-        writable, err = cglib.check_cgroup_writable(cg)
-        if not writable:
-            return False, err
-        
-        cglib.add_self(cg)
-        return True, ""
-    except PermissionError as e:
-        return False, f"Permission denied: {e}"
-    except OSError as e:
-        return False, f"OS error: {e}"
-    except Exception as e:
-        return False, f"failed to enter cgroup: {e}"
-
-
 def ensure_desk(name: str) -> None:
     """Ensure a desk exists on the board (prepared state)."""
     board = Board()
@@ -129,7 +75,6 @@ def ensure_desk(name: str) -> None:
         return
 
     workdir = auto_workdir(name)
-    method, cg_path, _warn = try_create_cgroup(name)
 
     board.upsert(
         name,
@@ -138,26 +83,16 @@ def ensure_desk(name: str) -> None:
         tmux_server=name,
         tmux_session=name,
         workdir=workdir,
-        cgroup_method=method,
-        cgroup_path=cg_path,
     )
 
 
-def desk_pids(name: str, *, cgroup_method: str, cgroup_path: str) -> set[int]:
-    """Get current PIDs associated with a desk (prefer cgroup)."""
-    if cgroup_path:
-        cg = cglib.CGroup(method=cgroup_method or "cgroupfs", path=Path(cgroup_path))
-        pids = cglib.list_pids(cg)
-        if pids:
-            return set(pids)
-
-    # Fallback: derive from tmux pane roots.
+def desk_pids(name: str) -> set[int]:
+    """Get current PIDs associated with a desk (from tmux)."""
     if is_tmux_active(name):
         ppid_map, _infos = build_ppid_map()
         panes = tmuxlib.list_panes(name, name)
         roots = [p.pane_pid for p in panes]
         return descendants(roots, ppid_map)
-
     return set()
 
 
@@ -177,13 +112,7 @@ def show_active_desks(exclude: str | None = None) -> None:
         active_tmux = is_tmux_active(name) if d.tmux_server else False
 
         pids: set[int] = set()
-        if d.cgroup_path:
-            cg = cglib.CGroup(method=d.cgroup_method or "cgroupfs", path=Path(d.cgroup_path))
-            cg_pids = cglib.list_pids(cg)
-            if cg_pids:
-                pids = set(cg_pids)
-
-        if not pids and active_tmux:
+        if active_tmux:
             panes = tmuxlib.list_panes(name, name)
             roots = [p.pane_pid for p in panes]
             pids = descendants(roots, ppid_map)
@@ -226,20 +155,11 @@ def save_snapshot(name: str, *, note: str, auto: bool) -> Path:
 
     active_tmux = is_tmux_active(name)
     pids: set[int] = set()
-    mode = ""
 
-    if d.cgroup_path:
-        cg = cglib.CGroup(method=d.cgroup_method or "cgroupfs", path=Path(d.cgroup_path))
-        cg_pids = cglib.list_pids(cg)
-        if cg_pids:
-            pids = set(cg_pids)
-            mode = "cgroup"
-
-    if not pids and active_tmux:
+    if active_tmux:
         panes = tmuxlib.list_panes(name, name)
         roots = [p.pane_pid for p in panes]
         pids = descendants(roots, ppid_map)
-        mode = "tmux"
 
     top = summarize_pids(pids, infos, max_items=20) if pids else []
 
@@ -273,8 +193,7 @@ def save_snapshot(name: str, *, note: str, auto: bool) -> Path:
         "status": d.status,
         "workdir": d.workdir,
         "tmux_active": active_tmux,
-        "cgroup_path": d.cgroup_path,
-        "pid_mode": mode,
+        "pid_mode": "tmux",
         "pids_count": len(pids),
         "top": top,
         "panes": panes_payload,
@@ -300,9 +219,6 @@ def prepare(name: str) -> None:
     board = Board()
     workdir = auto_workdir(name)
 
-    # Create cgroup path if possible (but do NOT enter it yet).
-    method, cg_path, warn = try_create_cgroup(name)
-
     board.upsert(
         name,
         status="prepared",
@@ -310,22 +226,16 @@ def prepare(name: str) -> None:
         tmux_server=name,
         tmux_session=name,
         workdir=workdir,
-        cgroup_method=method,
-        cgroup_path=cg_path,
     )
 
     console.print(f"\nReserved desk: [bold]{name}[/bold]")
     console.print(f"Workdir: {workdir}")
-
-    if warn and not cg_path:
-        console.print(f"[yellow]Note:[/yellow] {warn}")
-
     console.print(f"Next: hotdesk start {name}")
 
 
 @app.command()
 def start(name: str) -> None:
-    """Check in to your desk: enter tmux (and cgroup if available)."""
+    """Check in to your desk: enter tmux session."""
     ensure_desk(name)
 
     board = Board()
@@ -335,15 +245,6 @@ def start(name: str) -> None:
     # New start => clear saved_at so stop() can auto-save if needed.
     board.upsert(name, status="running", started_at=now_iso(), saved_at="")
 
-    # Best-effort: enter cgroup before exec'ing into tmux.
-    # Only warn if cgroup was configured but we can't enter it
-    if d.cgroup_path:
-        success, err = try_enter_cgroup(d.cgroup_method, d.cgroup_path)
-        if not success:
-            console.print(f"[dim]Note: cgroup unavailable, using tmux-only tracking[/dim]")
-            if err:
-                console.print(f"[dim]  → {err}[/dim]")
-
     workdir = d.workdir or auto_workdir(name)
     board.upsert(name, workdir=workdir, tmux_server=name, tmux_session=name)
 
@@ -352,7 +253,7 @@ def start(name: str) -> None:
 
 @app.command()
 def resume(name: str) -> None:
-    """Re-attach to an existing tmux desk session (no cgroup setup)."""
+    """Re-attach to an existing tmux desk session."""
     board = Board()
     d = board.get(name)
 
@@ -406,36 +307,19 @@ def stop(name: str) -> None:
     killed = 0
     exclude = {os.getpid()}
 
-    # Prefer cgroup kill.
-    if d.cgroup_path:
-        try:
-            cg = cglib.CGroup(method=d.cgroup_method or "cgroupfs", path=Path(d.cgroup_path))
-            killed += cglib.kill(cg, signal.SIGTERM, exclude=exclude)
-        except Exception:
-            pass
-
-    # Fallback kill: tmux-derived process tree.
-    if killed == 0:
-        try:
-            pids = desk_pids(name, cgroup_method=d.cgroup_method, cgroup_path=d.cgroup_path)
-            for pid in pids:
-                if pid in exclude:
-                    continue
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                    killed += 1
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-    # Best-effort cleanup: remove empty cgroup directory.
-    if d.cgroup_path:
-        try:
-            cg = cglib.CGroup(method=d.cgroup_method or "cgroupfs", path=Path(d.cgroup_path))
-            cglib.try_remove(cg)
-        except Exception:
-            pass
+    # Kill processes from tmux-derived process tree.
+    try:
+        pids = desk_pids(name)
+        for pid in pids:
+            if pid in exclude:
+                continue
+            try:
+                os.kill(pid, signal.SIGTERM)
+                killed += 1
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     board.upsert(name, status="stopped", stopped_at=now_iso())
 
@@ -467,13 +351,7 @@ def status() -> None:
         active_tmux = is_tmux_active(name) if d.tmux_server else False
 
         pids: set[int] = set()
-        if d.cgroup_path:
-            cg = cglib.CGroup(method=d.cgroup_method or "cgroupfs", path=Path(d.cgroup_path))
-            cg_pids = cglib.list_pids(cg)
-            if cg_pids:
-                pids = set(cg_pids)
-
-        if not pids and active_tmux:
+        if active_tmux:
             panes = tmuxlib.list_panes(name, name)
             roots = [p.pane_pid for p in panes]
             pids = descendants(roots, ppid_map)
@@ -564,72 +442,6 @@ def reply(name: str, msg_id: str, text: str = typer.Argument(None)) -> None:
     m = board.post(author=name, text=text.strip(), reply_to=msg_id)
 
     console.print(f"[green]Replied[/green] \\[{m.id}] {name} → {parent.author}: {text.strip()}")
-
-
-@app.command(name="setup-cgroup")
-def setup_cgroup() -> None:
-    """Show commands to set up cgroup v2 permissions (Linux only)."""
-    if not cglib.is_linux():
-        console.print("[yellow]cgroup v2 is Linux-only.[/yellow] On macOS/Windows, hotdesk uses tmux-only tracking.")
-        raise typer.Exit(code=0)
-
-    if not cglib.is_cgroup2():
-        console.print("[red]Error:[/red] cgroup v2 not detected on this system.")
-        console.print("Check if your kernel supports cgroup v2: cat /sys/fs/cgroup/cgroup.controllers")
-        raise typer.Exit(code=1)
-
-    base = cglib.default_base()
-    uid = os.getuid()
-    gid = os.getgid()
-
-    console.print("\n[bold]🔧 cgroup v2 Setup Commands[/bold]\n")
-    console.print("Run these commands with sudo to enable cgroup tracking:\n")
-
-    console.print("[cyan]# Create hotdesk cgroup directory[/cyan]")
-    console.print(f"sudo mkdir -p {base}")
-    console.print("")
-
-    console.print("[cyan]# Give ownership to current user[/cyan]")
-    console.print(f"sudo chown {uid}:{gid} {base}")
-    console.print("")
-
-    console.print("[cyan]# Set permissions[/cyan]")
-    console.print(f"sudo chmod 755 {base}")
-    console.print("")
-
-    console.print("[cyan]# Enable process tracking (may need to enable on parent first)[/cyan]")
-    console.print('echo "+pids" | sudo tee /sys/fs/cgroup/cgroup.subtree_control')
-    console.print("")
-
-    console.print("[dim]After running these commands, 'hotdesk start <name>' will use cgroup tracking.[/dim]")
-
-    # Check current status
-    console.print("\n[bold]Current Status:[/bold]")
-    if base.exists():
-        console.print(f"  ✓ {base} exists")
-        if os.access(base, os.W_OK):
-            console.print(f"  ✓ {base} is writable")
-        else:
-            console.print(f"  ✗ {base} is NOT writable")
-        
-        # Check cgroup.procs
-        procs_file = base / "cgroup.procs"
-        if procs_file.exists():
-            if os.access(procs_file, os.W_OK):
-                console.print(f"  ✓ {procs_file} is writable")
-            else:
-                console.print(f"  ✗ {procs_file} is NOT writable")
-                console.print(f"    Fix: sudo chmod 664 {procs_file}")
-        
-        # Show current process cgroup
-        try:
-            current_cg = Path("/proc/self/cgroup").read_text().strip()
-            console.print(f"\n[bold]Current process cgroup:[/bold]")
-            console.print(f"  {current_cg}")
-        except Exception:
-            pass
-    else:
-        console.print(f"  ✗ {base} does not exist")
 
 
 @app.command()

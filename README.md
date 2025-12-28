@@ -1,12 +1,12 @@
 # hotdesk
 
-**hotdesk** turns a single Linux account GPU box into a small **co-working space**.
+**hotdesk** turns a single Linux/macOS account into a small **co-working space**.
 
 - Each person picks a **desk name** (e.g. `alice`, `bob`).
 - A desk is backed by a **dedicated tmux server/session** (`tmux -L <name> ...`).
-- When possible, hotdesk also uses **cgroup v2** to keep *all* processes launched from that desk together (including daemonized/background processes), making status/stop much more reliable.
+- Process tracking is done via tmux pane PIDs and their descendants.
 
-> This is **coordination**, not security isolation. If everyone shares one Linux account (same UID), true isolation is not possible.
+> This is **coordination**, not security isolation. If everyone shares one account (same UID), true isolation is not possible.
 
 ---
 
@@ -14,8 +14,8 @@
 
 ### Desk management
 - `hotdesk prepare <name>` – check the board, reserve your desk name
-- `hotdesk start <name>` – check in: enter your tmux desk (and cgroup if available)
-- `hotdesk resume <name>` – re-attach to an existing tmux session (no cgroup setup)
+- `hotdesk start <name>` – check in: enter your tmux desk
+- `hotdesk resume <name>` – re-attach to an existing tmux session
 - `hotdesk status` – show who is active and what they're running
 - `hotdesk save <name>` – save a snapshot + leave a short note
 - `hotdesk stop <name>` – check out: **auto-saves** if you forgot to save, then stops that desk
@@ -81,38 +81,6 @@ Now you should have the `hotdesk` command.
 
 ---
 
-## One-time cgroup v2 setup (recommended, Linux only)
-
-hotdesk will **automatically** use cgroup v2 when it can create per-desk cgroups under a base directory.
-
-**Quick setup:** Run `hotdesk setup-cgroup` to see the exact commands for your system.
-
-Or manually:
-
-```bash
-# One-time setup (as admin/sudo)
-sudo mkdir -p /sys/fs/cgroup/hotdesk
-sudo chown $(id -u):$(id -g) /sys/fs/cgroup/hotdesk
-sudo chmod 755 /sys/fs/cgroup/hotdesk
-
-# Enable process tracking (important!)
-echo "+pids" | sudo tee /sys/fs/cgroup/cgroup.subtree_control
-```
-
-After that:
-
-```bash
-hotdesk start bob
-```
-
-### Notes
-
-- cgroup trees under `/sys/fs/cgroup` are often **reset on reboot**. If you want this to persist, add a small boot-time script/service that recreates the directory and permissions.
-- If cgroup v2 is not available (or not writable), hotdesk will fall back to tmux-based process tracking.
-- On **macOS/Windows**, cgroup is not available; hotdesk uses tmux-only tracking automatically.
-
----
-
 ## Notes and conventions
 
 ### Leaving a note without extra flags
@@ -137,10 +105,6 @@ By default hotdesk stores state in one of:
 You can override with:
 
 - `HOTDESK_STATE_DIR=/some/path`
-
-### cgroup base override
-
-- `HOTDESK_CGROUP_BASE=/sys/fs/cgroup/hotdesk`
 
 ---
 

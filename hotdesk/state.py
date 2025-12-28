@@ -58,9 +58,6 @@ class DeskState:
     tmux_session: str = ""
     workdir: str = ""
 
-    cgroup_method: str = ""
-    cgroup_path: str = ""
-
     def is_saved_since_start(self) -> bool:
         return _iso_gt(self.saved_at, self.started_at)
 
@@ -103,8 +100,6 @@ class Board:
         tmux_server: str | None = None,
         tmux_session: str | None = None,
         workdir: str | None = None,
-        cgroup_method: str | None = None,
-        cgroup_path: str | None = None,
     ) -> DeskState:
         self.lock_path.touch(exist_ok=True)
         with open(self.lock_path, "r+") as f:
@@ -136,11 +131,6 @@ class Board:
                 cur["tmux_session"] = tmux_session
             if workdir is not None:
                 cur["workdir"] = workdir
-
-            if cgroup_method is not None:
-                cur["cgroup_method"] = cgroup_method
-            if cgroup_path is not None:
-                cur["cgroup_path"] = cgroup_path
 
             cur["created_at"] = created_at
             cur["updated_at"] = updated_at
@@ -175,8 +165,6 @@ class Board:
                     tmux_server=str(cur.get("tmux_server", "")),
                     tmux_session=str(cur.get("tmux_session", "")),
                     workdir=str(cur.get("workdir", "")),
-                    cgroup_method=str(cur.get("cgroup_method", "")),
-                    cgroup_path=str(cur.get("cgroup_path", "")),
                 )
             fcntl.flock(f, fcntl.LOCK_UN)
         return out
