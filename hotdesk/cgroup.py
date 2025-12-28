@@ -61,11 +61,43 @@ def create(name: str, base: Path | None = None) -> CGroup:
 
 def add_pid(cg: CGroup, pid: int) -> None:
     """Move PID into cgroup."""
-    (cg.path / "cgroup.procs").write_text(str(pid) + "\n")
+    procs_file = cg.path / "cgroup.procs"
+    try:
+        procs_file.write_text(str(pid) + "\n")
+    except PermissionError as e:
+        raise PermissionError(
+            f"Cannot write to {procs_file}. "
+            f"Check: ls -la {procs_file}"
+        ) from e
+    except OSError as e:
+        # Common cgroup v2 errors:
+        # - EBUSY: process is in a threaded cgroup
+        # - ENOENT: cgroup doesn't exist
+        # - EINVAL: invalid operation
+        raise OSError(
+            f"Cannot move PID {pid} to cgroup {cg.path}: {e}. "
+            f"Try: cat /proc/{pid}/cgroup"
+        ) from e
 
 
 def add_self(cg: CGroup) -> None:
     add_pid(cg, os.getpid())
+
+
+def check_cgroup_writable(cg: CGroup) -> tuple[bool, str]:
+    """Check if we can write to the cgroup. Returns (success, error_message)."""
+    procs_file = cg.path / "cgroup.procs"
+    
+    if not cg.path.exists():
+        return False, f"cgroup path does not exist: {cg.path}"
+    
+    if not procs_file.exists():
+        return False, f"cgroup.procs not found: {procs_file}"
+    
+    if not os.access(procs_file, os.W_OK):
+        return False, f"cgroup.procs not writable: {procs_file}"
+    
+    return True, ""
 
 
 def list_pids(cg: CGroup) -> list[int]:

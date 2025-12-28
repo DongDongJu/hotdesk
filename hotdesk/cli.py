@@ -95,16 +95,30 @@ def try_create_cgroup(name: str) -> tuple[str, str, str]:
         return "", "", f"failed to create cgroup: {e}"
 
 
-def try_enter_cgroup(method: str, path: str) -> str:
-    """Move the current process into the desk cgroup (best-effort)."""
+def try_enter_cgroup(method: str, path: str) -> tuple[bool, str]:
+    """Move the current process into the desk cgroup (best-effort).
+    
+    Returns (success, message).
+    """
     if not method or not path:
-        return ""
+        return True, ""  # No cgroup configured, not an error
+    
     try:
         cg = cglib.CGroup(method=method, path=Path(path))
+        
+        # First check if writable
+        writable, err = cglib.check_cgroup_writable(cg)
+        if not writable:
+            return False, err
+        
         cglib.add_self(cg)
-        return ""
+        return True, ""
+    except PermissionError as e:
+        return False, f"Permission denied: {e}"
+    except OSError as e:
+        return False, f"OS error: {e}"
     except Exception as e:
-        return f"failed to enter cgroup: {e}"
+        return False, f"failed to enter cgroup: {e}"
 
 
 def ensure_desk(name: str) -> None:
@@ -324,9 +338,11 @@ def start(name: str) -> None:
     # Best-effort: enter cgroup before exec'ing into tmux.
     # Only warn if cgroup was configured but we can't enter it
     if d.cgroup_path:
-        warn = try_enter_cgroup(d.cgroup_method, d.cgroup_path)
-        if warn:
+        success, err = try_enter_cgroup(d.cgroup_method, d.cgroup_path)
+        if not success:
             console.print(f"[dim]Note: cgroup unavailable, using tmux-only tracking[/dim]")
+            if err:
+                console.print(f"[dim]  → {err}[/dim]")
 
     workdir = d.workdir or auto_workdir(name)
     board.upsert(name, workdir=workdir, tmux_server=name, tmux_session=name)
@@ -595,6 +611,23 @@ def setup_cgroup() -> None:
             console.print(f"  ✓ {base} is writable")
         else:
             console.print(f"  ✗ {base} is NOT writable")
+        
+        # Check cgroup.procs
+        procs_file = base / "cgroup.procs"
+        if procs_file.exists():
+            if os.access(procs_file, os.W_OK):
+                console.print(f"  ✓ {procs_file} is writable")
+            else:
+                console.print(f"  ✗ {procs_file} is NOT writable")
+                console.print(f"    Fix: sudo chmod 664 {procs_file}")
+        
+        # Show current process cgroup
+        try:
+            current_cg = Path("/proc/self/cgroup").read_text().strip()
+            console.print(f"\n[bold]Current process cgroup:[/bold]")
+            console.print(f"  {current_cg}")
+        except Exception:
+            pass
     else:
         console.print(f"  ✗ {base} does not exist")
 
