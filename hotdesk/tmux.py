@@ -65,3 +65,21 @@ def kill_session(server: str, session: str) -> bool:
     require_tmux()
     res = run(["tmux", "-L", server, "kill-session", "-t", session], check=False)
     return res.returncode == 0
+
+
+def detach_client(server: str, session: str) -> bool:
+    """Detach all clients from the session."""
+    require_tmux()
+    res = run(["tmux", "-L", server, "detach-client", "-s", session], check=False)
+    return res.returncode == 0
+
+
+def is_inside_session(server: str, session: str) -> bool:
+    """Check if we're currently inside the specified tmux session."""
+    import os
+    tmux_env = os.environ.get("TMUX", "")
+    if not tmux_env:
+        return False
+    # TMUX env format: /tmp/tmux-1000/{server},pid,index
+    # Check if server name matches
+    return f"/{server}," in tmux_env or tmux_env.endswith(f"/{server}")

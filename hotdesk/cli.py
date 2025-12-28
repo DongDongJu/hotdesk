@@ -309,6 +309,13 @@ def stop(name: str) -> None:
     console.print(f"[dim]  To resume: hotdesk start {name}[/dim]")
     console.print(f"[dim]  To terminate completely: hotdesk kill {name}[/dim]")
 
+    # If running inside the tmux session, detach the client
+    if tmuxlib.is_inside_session(name, name):
+        console.print(f"\n[dim]Detaching from tmux session...[/dim]")
+        import time as _time
+        _time.sleep(0.5)  # Give user time to see the message
+        tmuxlib.detach_client(name, name)
+
 
 @app.command(name="kill")
 def kill_desk(name: str, force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation")) -> None:
@@ -365,7 +372,7 @@ def kill_desk(name: str, force: bool = typer.Option(False, "--force", "-f", help
 
 
 @app.command()
-def freeze(name: str) -> None:
+def freeze(name: str, detach: bool = typer.Option(True, "--detach/--no-detach", help="Detach from tmux after freezing")) -> None:
     """Freeze (pause) all processes in a desk session using SIGSTOP."""
     board = Board()
     d = board.get(name)
@@ -403,6 +410,13 @@ def freeze(name: str) -> None:
 
     console.print(f"[cyan]❄ Frozen[/cyan] desk '{name}'. Paused {frozen_count} process(es).")
     console.print(f"[dim]To resume: hotdesk unfreeze {name}[/dim]")
+
+    # If running inside the tmux session, detach the client
+    if detach and tmuxlib.is_inside_session(name, name):
+        console.print(f"\n[dim]Detaching from tmux session...[/dim]")
+        import time as _time
+        _time.sleep(0.5)
+        tmuxlib.detach_client(name, name)
 
 
 @app.command()
