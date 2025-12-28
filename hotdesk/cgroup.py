@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 
+def is_linux() -> bool:
+    """Return True if running on Linux."""
+    return sys.platform.startswith("linux")
+
+
 def is_cgroup2() -> bool:
     """Return True if the host appears to have cgroup v2 mounted."""
+    if not is_linux():
+        return False
     return Path("/sys/fs/cgroup/cgroup.controllers").exists()
 
 

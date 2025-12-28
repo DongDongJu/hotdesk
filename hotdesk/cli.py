@@ -73,6 +73,10 @@ def try_create_cgroup(name: str) -> tuple[str, str, str]:
 
     Returns (method, path, warning). method/path empty if unavailable.
     """
+    # cgroup v2 is Linux-only; skip silently on other platforms
+    if not cglib.is_linux():
+        return "", "", ""
+
     if not cglib.is_cgroup2():
         return "", "", "cgroup v2 not detected"
 
