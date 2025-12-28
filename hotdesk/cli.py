@@ -550,6 +550,55 @@ def reply(name: str, msg_id: str, text: str = typer.Argument(None)) -> None:
     console.print(f"[green]Replied[/green] [{m.id}] {name} → {parent.author}: {text.strip()}")
 
 
+@app.command(name="setup-cgroup")
+def setup_cgroup() -> None:
+    """Show commands to set up cgroup v2 permissions (Linux only)."""
+    if not cglib.is_linux():
+        console.print("[yellow]cgroup v2 is Linux-only.[/yellow] On macOS/Windows, hotdesk uses tmux-only tracking.")
+        raise typer.Exit(code=0)
+
+    if not cglib.is_cgroup2():
+        console.print("[red]Error:[/red] cgroup v2 not detected on this system.")
+        console.print("Check if your kernel supports cgroup v2: cat /sys/fs/cgroup/cgroup.controllers")
+        raise typer.Exit(code=1)
+
+    base = cglib.default_base()
+    uid = os.getuid()
+    gid = os.getgid()
+
+    console.print("\n[bold]🔧 cgroup v2 Setup Commands[/bold]\n")
+    console.print("Run these commands with sudo to enable cgroup tracking:\n")
+
+    console.print("[cyan]# Create hotdesk cgroup directory[/cyan]")
+    console.print(f"sudo mkdir -p {base}")
+    console.print("")
+
+    console.print("[cyan]# Give ownership to current user[/cyan]")
+    console.print(f"sudo chown {uid}:{gid} {base}")
+    console.print("")
+
+    console.print("[cyan]# Set permissions[/cyan]")
+    console.print(f"sudo chmod 755 {base}")
+    console.print("")
+
+    console.print("[cyan]# Enable process tracking (may need to enable on parent first)[/cyan]")
+    console.print('echo "+pids" | sudo tee /sys/fs/cgroup/cgroup.subtree_control')
+    console.print("")
+
+    console.print("[dim]After running these commands, 'hotdesk start <name>' will use cgroup tracking.[/dim]")
+
+    # Check current status
+    console.print("\n[bold]Current Status:[/bold]")
+    if base.exists():
+        console.print(f"  ✓ {base} exists")
+        if os.access(base, os.W_OK):
+            console.print(f"  ✓ {base} is writable")
+        else:
+            console.print(f"  ✗ {base} is NOT writable")
+    else:
+        console.print(f"  ✗ {base} does not exist")
+
+
 @app.command()
 def messages(limit: int = typer.Option(20, "--limit", "-n", help="Number of messages to show")) -> None:
     """Show the shared message board (latest first, auto-removes after 7 days)."""

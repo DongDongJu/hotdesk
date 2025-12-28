@@ -81,17 +81,22 @@ Now you should have the `hotdesk` command.
 
 ---
 
-## One-time cgroup v2 setup (recommended)
+## One-time cgroup v2 setup (recommended, Linux only)
 
 hotdesk will **automatically** use cgroup v2 when it can create per-desk cgroups under a base directory.
 
-On many systems, creating/chowning a subtree under `/sys/fs/cgroup` requires `sudo`.
+**Quick setup:** Run `hotdesk setup-cgroup` to see the exact commands for your system.
+
+Or manually:
 
 ```bash
-# One-time (as an admin)
+# One-time setup (as admin/sudo)
 sudo mkdir -p /sys/fs/cgroup/hotdesk
 sudo chown $(id -u):$(id -g) /sys/fs/cgroup/hotdesk
-sudo chmod 775 /sys/fs/cgroup/hotdesk
+sudo chmod 755 /sys/fs/cgroup/hotdesk
+
+# Enable process tracking (important!)
+echo "+pids" | sudo tee /sys/fs/cgroup/cgroup.subtree_control
 ```
 
 After that:
@@ -104,6 +109,7 @@ hotdesk start bob
 
 - cgroup trees under `/sys/fs/cgroup` are often **reset on reboot**. If you want this to persist, add a small boot-time script/service that recreates the directory and permissions.
 - If cgroup v2 is not available (or not writable), hotdesk will fall back to tmux-based process tracking.
+- On **macOS/Windows**, cgroup is not available; hotdesk uses tmux-only tracking automatically.
 
 ---
 
